@@ -1,3 +1,4 @@
+// Select HTML elements
 const chatBody = document.querySelector(".chat-body");
 const messageInput = document.querySelector(".message-input");
 const sendMessage = document.querySelector("#send-message");
@@ -7,11 +8,12 @@ const fileCancelButton = fileUploadWrapper.querySelector("#file-cancel");
 const chatbotToggler = document.querySelector("#chatbot-toggler");
 const closeChatbot = document.querySelector("#close-chatbot");
 
-// API setup
-const API_KEY = "LLM_1117229294380485_CJpoF1Edko5LSuRJt5KWyctsejU";
+// Meta Model API setup
+const API_KEY = "LLM_2039073353449386_YmyZYjPY87EiGeqqaum2GTbjZY8";
 
-const API_URL =
-  "https://dev.meta.ai/install.sh";
+const API_URL = "https://api.meta.ai/v1/chat/completions";
+
+const MODEL_NAME = "muse-spark-1.3";
 
 // Initialize user message and file data
 const userData = {
@@ -24,72 +26,99 @@ const userData = {
 
 // Store chat history
 const chatHistory = [];
+
 const initialInputHeight = messageInput.scrollHeight;
 
 // Create message element with dynamic classes and return it
 const createMessageElement = (content, ...classes) => {
   const div = document.createElement("div");
+
   div.classList.add("message", ...classes);
   div.innerHTML = content;
+
   return div;
 };
 
-// Generate bot response using API
+// Generate bot response using Meta Model API
 const generateBotResponse = async (incomingMessageDiv) => {
   const messageElement =
     incomingMessageDiv.querySelector(".message-text");
 
-  // Add user message to chat history
-  const userParts = [];
-
-  if (userData.message) {
-    userParts.push({
-      text: userData.message,
-    });
-  }
-
-  if (userData.file?.data && userData.file?.mime_type) {
-    userParts.push({
-      inline_data: {
-        mime_type: userData.file.mime_type,
-        data: userData.file.data,
-      },
-    });
-  }
-
-  chatHistory.push({
-    role: "user",
-    parts: userParts,
-  });
-
-  // API request options
-  const requestOptions = {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-goog-api-key": API_KEY,
-    },
-    body: JSON.stringify({
-      contents: chatHistory,
-    }),
-  };
+  let userHistoryMessage = null;
 
   try {
     // Validate API key
     if (
       !API_KEY ||
-      API_KEY === "PUT_YOUR_NEW_API_KEY_HERE"
+      API_KEY === "ضع_مفتاح_Meta_API_هنا"
     ) {
       throw new Error(
-        "يرجى إضافة مفتاح Gemini API صالح في إعدادات الاتصال."
+        "يرجى إضافة مفتاح Meta API صالح داخل إعدادات الاتصال."
       );
     }
 
-    // Fetch bot response from API
+    // Build user message content
+    const userParts = [];
+
+    if (userData.message) {
+      userParts.push({
+        type: "text",
+        text: userData.message,
+      });
+    }
+
+    // Add image using Meta's image_url format
+    if (userData.file?.data && userData.file?.mime_type) {
+      userParts.push({
+        type: "image_url",
+        image_url: {
+          url: `data:${userData.file.mime_type};base64,${userData.file.data}`,
+          detail: "auto",
+        },
+      });
+    }
+
+    // Add user message to conversation history
+    userHistoryMessage = {
+      role: "user",
+      content:
+        userParts.length === 1 &&
+        userParts[0].type === "text"
+          ? userParts[0].text
+          : userParts,
+    };
+
+    chatHistory.push(userHistoryMessage);
+
+    // API request options
+    const requestOptions = {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: chatHistory,
+        stream: false,
+      }),
+    };
+
+    // Send request to Meta Model API
     const response = await fetch(API_URL, requestOptions);
 
-    // Read API response
-    const data = await response.json();
+    // Read API response safely
+    let data;
+
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(
+        "تعذر قراءة استجابة Meta API. تحقق من عنوان الاتصال."
+      );
+    }
 
     // Handle API errors
     if (!response.ok) {
@@ -100,58 +129,72 @@ const generateBotResponse = async (incomingMessageDiv) => {
       throw new Error(apiError);
     }
 
-    // Extract response safely
-    const candidate = data?.candidates?.[0];
+    // Extract response text
+    const apiResponseText =
+      data?.choices?.[0]?.message?.content;
 
-    const apiResponseText = candidate?.content?.parts
-      ?.map((part) => part.text || "")
-      .join("")
-      .replace(/\*\*(.*?)\*\*/g, "$1")
-      .trim();
+    // Support both text and array-form responses
+    let responseText = "";
+
+    if (typeof apiResponseText === "string") {
+      responseText = apiResponseText.trim();
+    } else if (Array.isArray(apiResponseText)) {
+      responseText = apiResponseText
+        .map((part) => {
+          if (typeof part === "string") {
+            return part;
+          }
+
+          return part?.text || "";
+        })
+        .join("")
+        .trim();
+    }
 
     // Check for empty response
-    if (!apiResponseText) {
-      const finishReason = candidate?.finishReason;
+    if (!responseText) {
+      const finishReason = data?.choices?.[0]?.finish_reason;
 
       throw new Error(
         finishReason
           ? `لم يتم إنشاء الرد. سبب الإيقاف: ${finishReason}`
-          : "لم يُرجع Gemini ردًا نصيًا. حاول مرة أخرى."
+          : "لم تُرجع Meta API ردًا نصيًا. حاول مرة أخرى."
       );
     }
 
     // Display bot response
-    messageElement.innerText = apiResponseText;
+    messageElement.innerText = responseText;
+    messageElement.style.color = "";
 
-    // Add bot response to chat history
+    // Add bot response to conversation history
     chatHistory.push({
-      role: "model",
-      parts: [
-        {
-          text: apiResponseText,
-        },
-      ],
+      role: "assistant",
+      content: responseText,
     });
-  } catch (error) {
-    // Handle errors
-    console.error("Gemini API Error:", error);
 
+  } catch (error) {
+    // Log error for debugging
+    console.error("Meta Model API Error:", error);
+
+    // Display error message
     messageElement.innerText =
       error.name === "TypeError"
-        ? "تعذر الاتصال بالخدمة. تحقق من اتصال الإنترنت وحاول مجددًا."
+        ? "تعذر الاتصال بالخدمة. تحقق من الإنترنت أو إعدادات الاتصال."
         : error.message || "حدث خطأ غير متوقع. حاول مرة أخرى.";
 
     messageElement.style.color = "#ff0000";
 
-    // Remove failed user message from history
-    // so it does not break the next request
-    if (chatHistory.length > 0) {
-      const lastMessage = chatHistory[chatHistory.length - 1];
+    // Remove the failed user message from history
+    if (userHistoryMessage) {
+      const historyIndex = chatHistory.lastIndexOf(
+        userHistoryMessage
+      );
 
-      if (lastMessage.role === "user") {
-        chatHistory.pop();
+      if (historyIndex !== -1) {
+        chatHistory.splice(historyIndex, 1);
       }
     }
+
   } finally {
     // Reset user's file data
     userData.file = {
@@ -160,11 +203,13 @@ const generateBotResponse = async (incomingMessageDiv) => {
     };
 
     fileInput.value = "";
+
     fileUploadWrapper.classList.remove("file-uploaded");
 
-    // Remove thinking indicator and scroll chat to bottom
+    // Remove thinking indicator
     incomingMessageDiv.classList.remove("thinking");
 
+    // Scroll chat to bottom
     chatBody.scrollTo({
       top: chatBody.scrollHeight,
       behavior: "smooth",
@@ -203,6 +248,7 @@ const handleOutgoingMessage = (e) => {
 
   chatBody.appendChild(outgoingMessageDiv);
 
+  // Scroll chat to bottom
   chatBody.scrollTo({
     top: chatBody.scrollHeight,
     behavior: "smooth",
@@ -210,8 +256,10 @@ const handleOutgoingMessage = (e) => {
 
   // Clear input after saving the message
   messageInput.value = "";
+
   messageInput.dispatchEvent(new Event("input"));
 
+  // Remove uploaded file indicator
   fileUploadWrapper.classList.remove("file-uploaded");
 
   // Simulate bot response with thinking indicator
@@ -222,8 +270,10 @@ const handleOutgoingMessage = (e) => {
         width="50"
         height="50"
         viewBox="0 0 1024 1024">
+
         <path
           d="M738.3 287.6H285.7c-59 0-106.8 47.8-106.8 106.8v303.1c0 59 47.8 106.8 106.8 106.8h81.5v111.1c0 .7.8 1.1 1.4.7l166.9-110.6 41.8-.8h117.4l43.6-.4c59 0 106.8-47.8 106.8-106.8V394.5c0-59-47.8-106.9-106.8-106.9zM351.7 448.2c0-29.5 23.9-53.5 53.5-53.5s53.5 23.9 53.5 53.5-23.9 53.5-53.5 53.5-53.5-23.9-53.5-53.5zm157.9 267.1c-67.8 0-123.8-47.5-132.3-109h264.6c-8.6 61.5-64.5 109-132.3 109zm110-213.7c-29.5 0-53.5-23.9-53.5-53.5s23.9-53.5 53.5-53.5 53.5 23.9 53.5 53.5-23.9 53.5-53.5 53.5zM867.2 644.5V453.1h26.5c19.4 0 35.1 15.7 35.1 35.1v121.1c0 19.4-15.7 35.1-35.1 35.1h-26.5zM95.2 609.4V488.2c0-19.4 15.7-35.1 35.1-35.1h26.5v191.3h-26.5c-19.4 0-35.1-15.7-35.1-35.1zM561.5 149.6c0 23.4-15.6 43.3-36.9 49.7v44.9h-30v-44.9c-21.4-6.5-36.9-26.3-36.9-49.7 0-28.6 23.3-51.9 51.9-51.9s51.9 23.3 51.9 51.9z"/>
+
       </svg>
 
       <div class="message-text">
@@ -243,12 +293,15 @@ const handleOutgoingMessage = (e) => {
 
     chatBody.appendChild(incomingMessageDiv);
 
+    // Scroll chat to bottom
     chatBody.scrollTo({
       top: chatBody.scrollHeight,
       behavior: "smooth",
     });
 
+    // Generate response
     generateBotResponse(incomingMessageDiv);
+
   }, 600);
 };
 
@@ -273,6 +326,7 @@ messageInput.addEventListener("keydown", (e) => {
     window.innerWidth > 768
   ) {
     e.preventDefault();
+
     handleOutgoingMessage(e);
   }
 });
@@ -286,7 +340,9 @@ fileInput.addEventListener("change", () => {
   // Accept images only
   if (!file.type.startsWith("image/")) {
     alert("يرجى اختيار ملف صورة.");
+
     fileInput.value = "";
+
     return;
   }
 
@@ -301,7 +357,7 @@ fileInput.addEventListener("change", () => {
 
     const base64String = result.split(",")[1];
 
-    // Store file data
+    // Store image data
     userData.file = {
       data: base64String,
       mime_type: file.type,
@@ -310,6 +366,7 @@ fileInput.addEventListener("change", () => {
 
   reader.onerror = () => {
     alert("تعذر قراءة الملف. حاول اختيار صورة أخرى.");
+
     fileInput.value = "";
   };
 
@@ -348,6 +405,8 @@ const picker = new EmojiMart.Picker({
     );
 
     messageInput.focus();
+
+    messageInput.dispatchEvent(new Event("input"));
   },
 
   onClickOutside: (e) => {
@@ -359,6 +418,7 @@ const picker = new EmojiMart.Picker({
   },
 });
 
+// Add emoji picker to chat form
 document.querySelector(".chat-form").appendChild(picker);
 
 // Send message
