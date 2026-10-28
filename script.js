@@ -8,10 +8,10 @@ const chatbotToggler = document.querySelector("#chatbot-toggler");
 const closeChatbot = document.querySelector("#close-chatbot");
 
 // API setup
-const API_KEY = "AQ.Ab8RN6KyfShLnns2wkZzr3oMwffSx7fkvrJ3FV_9487RBElvhQ";
+const API_KEY = "LLM_1117229294380485_CJpoF1Edko5LSuRJt5KWyctsejU";
 
 const API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
+  "https://dev.meta.ai/install.sh";
 
 // Initialize user message and file data
 const userData = {
