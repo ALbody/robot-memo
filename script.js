@@ -7,22 +7,13 @@ const fileCancelButton = fileUploadWrapper.querySelector("#file-cancel");
 const chatbotToggler = document.querySelector("#chatbot-toggler");
 const closeChatbot = document.querySelector("#close-chatbot");
 
-// ========================================
-// BazaarLink API setup
-// ========================================
-
-const API_KEY = "sk-bl-G_PENgckZ0mZGHbRbmo-bmMwDCLnnD2Ky0fO3t661iqj7V9U";
+// API setup
+const API_KEY = "LLM_1117229294380485_CJpoF1Edko5LSuRJt5KWyctsejU";
 
 const API_URL =
-  "https://api.bazaarlink.ai/v1/chat/completions";
+  "https://dev.meta.ai/install.sh";
 
-// التوجيه التلقائي للنماذج المجانية
-const MODEL_NAME = "auto:free";
-
-// ========================================
 // Initialize user message and file data
-// ========================================
-
 const userData = {
   message: null,
   file: {
@@ -35,10 +26,7 @@ const userData = {
 const chatHistory = [];
 const initialInputHeight = messageInput.scrollHeight;
 
-// ========================================
-// Create message element
-// ========================================
-
+// Create message element with dynamic classes and return it
 const createMessageElement = (content, ...classes) => {
   const div = document.createElement("div");
   div.classList.add("message", ...classes);
@@ -46,15 +34,45 @@ const createMessageElement = (content, ...classes) => {
   return div;
 };
 
-// ========================================
-// Generate bot response using BazaarLink API
-// ========================================
-
+// Generate bot response using API
 const generateBotResponse = async (incomingMessageDiv) => {
   const messageElement =
     incomingMessageDiv.querySelector(".message-text");
 
-  let currentUserMessage = null;
+  // Add user message to chat history
+  const userParts = [];
+
+  if (userData.message) {
+    userParts.push({
+      text: userData.message,
+    });
+  }
+
+  if (userData.file?.data && userData.file?.mime_type) {
+    userParts.push({
+      inline_data: {
+        mime_type: userData.file.mime_type,
+        data: userData.file.data,
+      },
+    });
+  }
+
+  chatHistory.push({
+    role: "user",
+    parts: userParts,
+  });
+
+  // API request options
+  const requestOptions = {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-goog-api-key": API_KEY,
+    },
+    body: JSON.stringify({
+      contents: chatHistory,
+    }),
+  };
 
   try {
     // Validate API key
@@ -63,72 +81,11 @@ const generateBotResponse = async (incomingMessageDiv) => {
       API_KEY === "PUT_YOUR_NEW_API_KEY_HERE"
     ) {
       throw new Error(
-        "يرجى إضافة مفتاح BazaarLink API صالح في إعدادات الاتصال."
+        "يرجى إضافة مفتاح Gemini API صالح في إعدادات الاتصال."
       );
     }
 
-    // Prepare user message
-    if (userData.file?.data && userData.file?.mime_type) {
-      // Convert the uploaded image into a data URI
-      const imageDataURI =
-        `data:${userData.file.mime_type};base64,${userData.file.data}`;
-
-      currentUserMessage = {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text:
-              userData.message ||
-              "اشرح محتوى الصورة المرفقة.",
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: imageDataURI,
-              detail: "auto",
-            },
-          },
-        ],
-      };
-    } else {
-      currentUserMessage = {
-        role: "user",
-        content: userData.message,
-      };
-    }
-
-    // Prepare conversation history without changing its stored format
-    const messages = [
-      {
-        role: "system",
-        content:
-          "أنت مساعد ذكي ومفيد. أجب باللغة التي يستخدمها المستخدم، " +
-          "واجعل إجاباتك واضحة ومباشرة.",
-      },
-      ...chatHistory,
-      currentUserMessage,
-    ];
-
-    // API request options
-    const requestOptions = {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${API_KEY}`,
-      },
-
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: messages,
-        stream: false,
-        temperature: 0.7,
-        max_tokens: 1000,
-      }),
-    };
-
-    // Fetch bot response from BazaarLink
+    // Fetch bot response from API
     const response = await fetch(API_URL, requestOptions);
 
     // Read API response
@@ -138,57 +95,63 @@ const generateBotResponse = async (incomingMessageDiv) => {
     if (!response.ok) {
       const apiError =
         data?.error?.message ||
-        data?.message ||
         `حدث خطأ أثناء الاتصال بالخدمة. رمز الخطأ: ${response.status}`;
 
       throw new Error(apiError);
     }
 
     // Extract response safely
-    const apiResponse = data?.choices?.[0]?.message?.content;
+    const candidate = data?.candidates?.[0];
 
-    let apiResponseText = "";
-
-    if (typeof apiResponse === "string") {
-      apiResponseText = apiResponse.trim();
-    } else if (Array.isArray(apiResponse)) {
-      apiResponseText = apiResponse
-        .filter((part) => part.type === "text")
-        .map((part) => part.text || "")
-        .join("")
-        .trim();
-    }
+    const apiResponseText = candidate?.content?.parts
+      ?.map((part) => part.text || "")
+      .join("")
+      .replace(/\*\*(.*?)\*\*/g, "$1")
+      .trim();
 
     // Check for empty response
     if (!apiResponseText) {
+      const finishReason = candidate?.finishReason;
+
       throw new Error(
-        "لم يُرجع النموذج ردًا نصيًا. تحقق من النموذج المتاح وحاول مرة أخرى."
+        finishReason
+          ? `لم يتم إنشاء الرد. سبب الإيقاف: ${finishReason}`
+          : "لم يُرجع Gemini ردًا نصيًا. حاول مرة أخرى."
       );
     }
 
     // Display bot response
     messageElement.innerText = apiResponseText;
 
-    // Add successful messages to chat history
-    chatHistory.push(currentUserMessage);
-
+    // Add bot response to chat history
     chatHistory.push({
-      role: "assistant",
-      content: apiResponseText,
+      role: "model",
+      parts: [
+        {
+          text: apiResponseText,
+        },
+      ],
     });
-
   } catch (error) {
     // Handle errors
-    console.error("BazaarLink API Error:", error);
+    console.error("Gemini API Error:", error);
 
     messageElement.innerText =
       error.name === "TypeError"
-        ? "تعذر الاتصال بالخدمة. تحقق من اتصال الإنترنت وإعدادات API وحاول مجددًا."
-        : error.message ||
-          "حدث خطأ غير متوقع. حاول مرة أخرى.";
+        ? "تعذر الاتصال بالخدمة. تحقق من اتصال الإنترنت وحاول مجددًا."
+        : error.message || "حدث خطأ غير متوقع. حاول مرة أخرى.";
 
     messageElement.style.color = "#ff0000";
 
+    // Remove failed user message from history
+    // so it does not break the next request
+    if (chatHistory.length > 0) {
+      const lastMessage = chatHistory[chatHistory.length - 1];
+
+      if (lastMessage.role === "user") {
+        chatHistory.pop();
+      }
+    }
   } finally {
     // Reset user's file data
     userData.file = {
@@ -197,7 +160,6 @@ const generateBotResponse = async (incomingMessageDiv) => {
     };
 
     fileInput.value = "";
-
     fileUploadWrapper.classList.remove("file-uploaded");
 
     // Remove thinking indicator and scroll chat to bottom
@@ -210,10 +172,7 @@ const generateBotResponse = async (incomingMessageDiv) => {
   }
 };
 
-// ========================================
 // Handle outgoing user messages
-// ========================================
-
 const handleOutgoingMessage = (e) => {
   e.preventDefault();
 
@@ -293,10 +252,7 @@ const handleOutgoingMessage = (e) => {
   }, 600);
 };
 
-// ========================================
 // Adjust input field height dynamically
-// ========================================
-
 messageInput.addEventListener("input", () => {
   messageInput.style.height = `${initialInputHeight}px`;
 
@@ -309,10 +265,7 @@ messageInput.addEventListener("input", () => {
       : "32px";
 });
 
-// ========================================
 // Handle Enter key press for sending messages
-// ========================================
-
 messageInput.addEventListener("keydown", (e) => {
   if (
     e.key === "Enter" &&
@@ -324,10 +277,7 @@ messageInput.addEventListener("keydown", (e) => {
   }
 });
 
-// ========================================
 // Handle file input change and preview the selected file
-// ========================================
-
 fileInput.addEventListener("change", () => {
   const file = fileInput.files[0];
 
@@ -336,13 +286,6 @@ fileInput.addEventListener("change", () => {
   // Accept images only
   if (!file.type.startsWith("image/")) {
     alert("يرجى اختيار ملف صورة.");
-    fileInput.value = "";
-    return;
-  }
-
-  // Limit image size to 5 MB
-  if (file.size > 5 * 1024 * 1024) {
-    alert("حجم الصورة أكبر من 5 ميجابايت. اختر صورة أصغر.");
     fileInput.value = "";
     return;
   }
@@ -367,6 +310,79 @@ fileInput.addEventListener("change", () => {
 
   reader.onerror = () => {
     alert("تعذر قراءة الملف. حاول اختيار صورة أخرى.");
+    fileInput.value = "";
+  };
+
+  reader.readAsDataURL(file);
+});
+
+// Cancel file upload
+fileCancelButton.addEventListener("click", () => {
+  userData.file = {
+    data: null,
+    mime_type: null,
+  };
+
+  fileInput.value = "";
+
+  fileUploadWrapper.classList.remove("file-uploaded");
+});
+
+// Initialize emoji picker and handle emoji selection
+const picker = new EmojiMart.Picker({
+  theme: "light",
+  skinTonePosition: "none",
+  previewPosition: "none",
+
+  onEmojiSelect: (emoji) => {
+    const {
+      selectionStart: start,
+      selectionEnd: end,
+    } = messageInput;
+
+    messageInput.setRangeText(
+      emoji.native,
+      start,
+      end,
+      "end"
+    );
+
+    messageInput.focus();
+  },
+
+  onClickOutside: (e) => {
+    if (e.target.id === "emoji-picker") {
+      document.body.classList.toggle("show-emoji-picker");
+    } else {
+      document.body.classList.remove("show-emoji-picker");
+    }
+  },
+});
+
+document.querySelector(".chat-form").appendChild(picker);
+
+// Send message
+sendMessage.addEventListener("click", (e) => {
+  handleOutgoingMessage(e);
+});
+
+// Upload file
+document
+  .querySelector("#file-upload")
+  .addEventListener("click", () => {
+    fileInput.click();
+  });
+
+// Close chatbot
+closeChatbot.addEventListener("click", () => {
+  document.body.classList.remove("show-chatbot");
+});
+
+// Toggle chatbot
+chatbotToggler.addEventListener("click", () => {
+  document.body.classList.toggle("show-chatbot");
+});
+ختيار صورة أخرى.");
     fileInput.value = "";
   };
 
