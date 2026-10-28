@@ -1,395 +1,496 @@
-// Select HTML elements
+// ========================================
+// BazaarLink AI Chatbot
+// ========================================
+
+// ضع مفتاح BazaarLink الخاص بك هنا للاختبار فقط.
+// تنبيه: المفتاح داخل JavaScript يمكن لأي زائر للموقع رؤيته.
+const API_KEY = "sk-bl-G_PENgckZ0mZGHbRbmo-bmMwDCLnnD2Ky0fO3t661iqj7V9U";
+
+// رابط API
+const API_URL = "https://api.bazaarlink.ai/v1/chat/completions";
+
+// استخدم اسم نموذج موجود بالفعل في قائمة BazaarLink.
+// يمكنك تغييره إلى أي model ID متاح لحسابك.
+const MODEL_NAME = "openai/gpt-4o";
+
+// ========================================
+// عناصر الواجهة
+// ========================================
+
 const chatBody = document.querySelector(".chat-body");
 const messageInput = document.querySelector(".message-input");
-const sendMessage = document.querySelector("#send-message");
+const sendMessageButton = document.querySelector("#send-message");
 const fileInput = document.querySelector("#file-input");
 const fileUploadWrapper = document.querySelector(".file-upload-wrapper");
-const fileCancelButton = fileUploadWrapper.querySelector("#file-cancel");
+const fileCancelButton = document.querySelector("#file-cancel");
 const chatbotToggler = document.querySelector("#chatbot-toggler");
-const closeChatbot = document.querySelector("#close-chatbot");
+const closeChatbotButton = document.querySelector("#close-chatbot");
 
-// Meta Model API setup
-const API_KEY = "LLM_2039073353449386_YmyZYjPY87EiGeqqaum2GTbjZY8";
+// ========================================
+// متغيرات المحادثة
+// ========================================
 
-const API_URL = "https://api.meta.ai/v1/chat/completions";
+const chatHistory = [
+    {
+        role: "system",
+        content:
+            "أنت مساعد ذكاء اصطناعي مفيد. أجب بلغة المستخدم، واجعل إجاباتك واضحة ومنظمة. إذا سألك المستخدم بالعربية فأجب بالعربية."
+    }
+];
 
-const MODEL_NAME = "muse-spark-1.3";
+let selectedFile = null;
+let isGenerating = false;
 
-// Initialize user message and file data
-const userData = {
-  message: null,
-  file: {
-    data: null,
-    mime_type: null,
-  },
-};
+// ========================================
+// أدوات مساعدة
+// ========================================
 
-// Store chat history
-const chatHistory = [];
+function escapeHTML(text) {
+    return String(text).replace(/[&<>"']/g, function (char) {
+        const entities = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;"
+        };
 
-const initialInputHeight = messageInput.scrollHeight;
+        return entities[char];
+    });
+}
 
-// Create message element with dynamic classes and return it
-const createMessageElement = (content, ...classes) => {
-  const div = document.createElement("div");
+function scrollChatToBottom() {
+    if (chatBody) {
+        chatBody.scrollTop = chatBody.scrollHeight;
+    }
+}
 
-  div.classList.add("message", ...classes);
-  div.innerHTML = content;
+function createMessageElement(content, className) {
+    const messageElement = document.createElement("div");
+    messageElement.classList.add("message", className);
 
-  return div;
-};
+    const messageText = document.createElement("div");
+    messageText.classList.add("message-text");
+    messageText.innerHTML = escapeHTML(content).replace(/\n/g, "<br>");
 
-// Generate bot response using Meta Model API
-const generateBotResponse = async (incomingMessageDiv) => {
-  const messageElement =
-    incomingMessageDiv.querySelector(".message-text");
+    messageElement.appendChild(messageText);
 
-  let userHistoryMessage = null;
+    return messageElement;
+}
 
-  try {
-    // Validate API key
-    if (
-      !API_KEY ||
-      API_KEY === "ضع_مفتاح_Meta_API_هنا"
-    ) {
-      throw new Error(
-        "يرجى إضافة مفتاح Meta API صالح داخل إعدادات الاتصال."
-      );
+function addMessage(content, className) {
+    if (!chatBody) return null;
+
+    const messageElement = createMessageElement(content, className);
+    chatBody.appendChild(messageElement);
+
+    scrollChatToBottom();
+
+    return messageElement;
+}
+
+function setLoading(isLoading) {
+    isGenerating = isLoading;
+
+    if (sendMessageButton) {
+        sendMessageButton.disabled = isLoading;
     }
 
-    // Build user message content
-    const userParts = [];
-
-    if (userData.message) {
-      userParts.push({
-        type: "text",
-        text: userData.message,
-      });
+    if (messageInput) {
+        messageInput.disabled = isLoading;
     }
 
-    // Add image using Meta's image_url format
-    if (userData.file?.data && userData.file?.mime_type) {
-      userParts.push({
-        type: "image_url",
-        image_url: {
-          url: `data:${userData.file.mime_type};base64,${userData.file.data}`,
-          detail: "auto",
+    if (sendMessageButton) {
+        sendMessageButton.style.opacity = isLoading ? "0.6" : "1";
+    }
+}
+
+function showError(message) {
+    addMessage(message, "bot-message");
+}
+
+// ========================================
+// التعامل مع الملفات والصور
+// ========================================
+
+function clearSelectedFile() {
+    selectedFile = null;
+
+    if (fileInput) {
+        fileInput.value = "";
+    }
+
+    if (fileUploadWrapper) {
+        fileUploadWrapper.classList.remove("file-uploaded");
+    }
+
+    const preview = document.querySelector(".selected-file-preview");
+
+    if (preview) {
+        preview.remove();
+    }
+}
+
+function showSelectedFile(file) {
+    if (!chatBody || !file) return;
+
+    const oldPreview = document.querySelector(".selected-file-preview");
+
+    if (oldPreview) {
+        oldPreview.remove();
+    }
+
+    const preview = document.createElement("div");
+    preview.className = "selected-file-preview";
+
+    if (file.type.startsWith("image/")) {
+        const image = document.createElement("img");
+        image.src = URL.createObjectURL(file);
+        image.alt = "الصورة المختارة";
+        image.style.maxWidth = "160px";
+        image.style.maxHeight = "160px";
+        image.style.objectFit = "contain";
+
+        preview.appendChild(image);
+    }
+
+    const fileName = document.createElement("span");
+    fileName.textContent = file.name;
+    preview.appendChild(fileName);
+
+    chatBody.appendChild(preview);
+    scrollChatToBottom();
+}
+
+if (fileInput) {
+    fileInput.addEventListener("change", function () {
+        const file = this.files && this.files[0];
+
+        if (!file) return;
+
+        // في هذه النسخة نسمح بالصور فقط.
+        if (!file.type.startsWith("image/")) {
+            showError("من فضلك اختر ملف صورة فقط.");
+            clearSelectedFile();
+            return;
+        }
+
+        // حد أقصى 5 ميجابايت للصورة.
+        if (file.size > 5 * 1024 * 1024) {
+            showError("حجم الصورة أكبر من 5 ميجابايت. اختر صورة أصغر.");
+            clearSelectedFile();
+            return;
+        }
+
+        selectedFile = file;
+
+        if (fileUploadWrapper) {
+            fileUploadWrapper.classList.add("file-uploaded");
+        }
+
+        showSelectedFile(file);
+    });
+}
+
+if (fileCancelButton) {
+    fileCancelButton.addEventListener("click", clearSelectedFile);
+}
+
+// ========================================
+// تحويل الصورة إلى Base64
+// ========================================
+
+function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("تعذر قراءة الصورة."));
+
+        reader.readAsDataURL(file);
+    });
+}
+
+// ========================================
+// إرسال الطلب إلى BazaarLink
+// ========================================
+
+async function getAIResponse(userText, imageFile = null) {
+    const messages = [...chatHistory];
+
+    let userContent = userText;
+
+    // عند إرفاق صورة، نرسلها بصيغة OpenAI متعددة الوسائط.
+    if (imageFile) {
+        const imageDataURL = await fileToDataURL(imageFile);
+
+        userContent = [
+            {
+                type: "text",
+                text: userText || "اشرح لي محتوى هذه الصورة."
+            },
+            {
+                type: "image_url",
+                image_url: {
+                    url: imageDataURL,
+                    detail: "auto"
+                }
+            }
+        ];
+    }
+
+    messages.push({
+        role: "user",
+        content: userContent
+    });
+
+    const response = await fetch(API_URL, {
+        method: "POST",
+
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${API_KEY}`
         },
-      });
-    }
 
-    // Add user message to conversation history
-    userHistoryMessage = {
-      role: "user",
-      content:
-        userParts.length === 1 &&
-        userParts[0].type === "text"
-          ? userParts[0].text
-          : userParts,
-    };
-
-    chatHistory.push(userHistoryMessage);
-
-    // API request options
-    const requestOptions = {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${API_KEY}`,
-      },
-
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: chatHistory,
-        stream: false,
-      }),
-    };
-
-    // Send request to Meta Model API
-    const response = await fetch(API_URL, requestOptions);
-
-    // Read API response safely
-    let data;
-
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error(
-        "تعذر قراءة استجابة Meta API. تحقق من عنوان الاتصال."
-      );
-    }
-
-    // Handle API errors
-    if (!response.ok) {
-      const apiError =
-        data?.error?.message ||
-        `حدث خطأ أثناء الاتصال بالخدمة. رمز الخطأ: ${response.status}`;
-
-      throw new Error(apiError);
-    }
-
-    // Extract response text
-    const apiResponseText =
-      data?.choices?.[0]?.message?.content;
-
-    // Support both text and array-form responses
-    let responseText = "";
-
-    if (typeof apiResponseText === "string") {
-      responseText = apiResponseText.trim();
-    } else if (Array.isArray(apiResponseText)) {
-      responseText = apiResponseText
-        .map((part) => {
-          if (typeof part === "string") {
-            return part;
-          }
-
-          return part?.text || "";
+        body: JSON.stringify({
+            model: MODEL_NAME,
+            messages: messages,
+            stream: false,
+            temperature: 0.7,
+            max_tokens: 1200
         })
-        .join("")
-        .trim();
-    }
-
-    // Check for empty response
-    if (!responseText) {
-      const finishReason = data?.choices?.[0]?.finish_reason;
-
-      throw new Error(
-        finishReason
-          ? `لم يتم إنشاء الرد. سبب الإيقاف: ${finishReason}`
-          : "لم تُرجع Meta API ردًا نصيًا. حاول مرة أخرى."
-      );
-    }
-
-    // Display bot response
-    messageElement.innerText = responseText;
-    messageElement.style.color = "";
-
-    // Add bot response to conversation history
-    chatHistory.push({
-      role: "assistant",
-      content: responseText,
     });
 
-  } catch (error) {
-    // Log error for debugging
-    console.error("Meta Model API Error:", error);
+    const data = await response.json().catch(() => ({}));
 
-    // Display error message
-    messageElement.innerText =
-      error.name === "TypeError"
-        ? "تعذر الاتصال بالخدمة. تحقق من الإنترنت أو إعدادات الاتصال."
-        : error.message || "حدث خطأ غير متوقع. حاول مرة أخرى.";
+    if (!response.ok) {
+        const apiMessage =
+            data?.error?.message ||
+            data?.message ||
+            `HTTP ${response.status}`;
 
-    messageElement.style.color = "#ff0000";
-
-    // Remove the failed user message from history
-    if (userHistoryMessage) {
-      const historyIndex = chatHistory.lastIndexOf(
-        userHistoryMessage
-      );
-
-      if (historyIndex !== -1) {
-        chatHistory.splice(historyIndex, 1);
-      }
+        throw new Error(apiMessage);
     }
 
-  } finally {
-    // Reset user's file data
-    userData.file = {
-      data: null,
-      mime_type: null,
-    };
+    const answer = data?.choices?.[0]?.message?.content;
 
-    fileInput.value = "";
-
-    fileUploadWrapper.classList.remove("file-uploaded");
-
-    // Remove thinking indicator
-    incomingMessageDiv.classList.remove("thinking");
-
-    // Scroll chat to bottom
-    chatBody.scrollTo({
-      top: chatBody.scrollHeight,
-      behavior: "smooth",
-    });
-  }
-};
-
-// Handle outgoing user messages
-const handleOutgoingMessage = (e) => {
-  e.preventDefault();
-
-  userData.message = messageInput.value.trim();
-
-  // Prevent empty messages unless a file is attached
-  if (!userData.message && !userData.file?.data) {
-    return;
-  }
-
-  // Create and display user message
-  const messageContent = `
-    <div class="message-text"></div>
-    ${
-      userData.file?.data
-        ? `<img src="data:${userData.file.mime_type};base64,${userData.file.data}" class="attachment" />`
-        : ""
+    if (typeof answer === "string" && answer.trim()) {
+        return {
+            answer: answer.trim(),
+            userContent: userContent
+        };
     }
-  `;
 
-  const outgoingMessageDiv = createMessageElement(
-    messageContent,
-    "user-message"
-  );
+    // بعض النماذج قد ترجع المحتوى على هيئة أجزاء.
+    if (Array.isArray(answer)) {
+        const text = answer
+            .filter(part => part && part.type === "text")
+            .map(part => part.text || "")
+            .join("\n")
+            .trim();
 
-  outgoingMessageDiv.querySelector(".message-text").innerText =
-    userData.message || "";
+        if (text) {
+            return {
+                answer: text,
+                userContent: userContent
+            };
+        }
+    }
 
-  chatBody.appendChild(outgoingMessageDiv);
+    throw new Error("وصل رد من API، لكن لم أتمكن من استخراج النص.");
+}
 
-  // Scroll chat to bottom
-  chatBody.scrollTo({
-    top: chatBody.scrollHeight,
-    behavior: "smooth",
-  });
+// ========================================
+// إرسال الرسالة
+// ========================================
 
-  // Clear input after saving the message
-  messageInput.value = "";
+async function handleOutgoingMessage(event) {
+    if (event) {
+        event.preventDefault();
+    }
 
-  messageInput.dispatchEvent(new Event("input"));
+    if (isGenerating || !messageInput) return;
 
-  // Remove uploaded file indicator
-  fileUploadWrapper.classList.remove("file-uploaded");
+    const userText = messageInput.value.trim();
 
-  // Simulate bot response with thinking indicator
-  setTimeout(() => {
-    const messageContent = `
-      <svg class="bot-avatar"
-        xmlns="http://www.w3.org/2000/svg"
-        width="50"
-        height="50"
-        viewBox="0 0 1024 1024">
+    if (!userText && !selectedFile) return;
 
-        <path
-          d="M738.3 287.6H285.7c-59 0-106.8 47.8-106.8 106.8v303.1c0 59 47.8 106.8 106.8 106.8h81.5v111.1c0 .7.8 1.1 1.4.7l166.9-110.6 41.8-.8h117.4l43.6-.4c59 0 106.8-47.8 106.8-106.8V394.5c0-59-47.8-106.9-106.8-106.9zM351.7 448.2c0-29.5 23.9-53.5 53.5-53.5s53.5 23.9 53.5 53.5-23.9 53.5-53.5 53.5-53.5-23.9-53.5-53.5zm157.9 267.1c-67.8 0-123.8-47.5-132.3-109h264.6c-8.6 61.5-64.5 109-132.3 109zm110-213.7c-29.5 0-53.5-23.9-53.5-53.5s23.9-53.5 53.5-53.5 53.5 23.9 53.5 53.5-23.9 53.5-53.5 53.5zM867.2 644.5V453.1h26.5c19.4 0 35.1 15.7 35.1 35.1v121.1c0 19.4-15.7 35.1-35.1 35.1h-26.5zM95.2 609.4V488.2c0-19.4 15.7-35.1 35.1-35.1h26.5v191.3h-26.5c-19.4 0-35.1-15.7-35.1-35.1zM561.5 149.6c0 23.4-15.6 43.3-36.9 49.7v44.9h-30v-44.9c-21.4-6.5-36.9-26.3-36.9-49.7 0-28.6 23.3-51.9 51.9-51.9s51.9 23.3 51.9 51.9z"/>
+    if (
+        !API_KEY ||
+        API_KEY === "ضع_مفتاح_BazaarLink_هنا"
+    ) {
+        showError("أضف مفتاح BazaarLink في متغير API_KEY داخل ملف script.js أولًا.");
+        return;
+    }
 
-      </svg>
+    const imageFile = selectedFile;
 
-      <div class="message-text">
-        <div class="thinking-indicator">
-          <div class="dot"></div>
-          <div class="dot"></div>
-          <div class="dot"></div>
-        </div>
-      </div>
-    `;
-
-    const incomingMessageDiv = createMessageElement(
-      messageContent,
-      "bot-message",
-      "thinking"
+    // عرض رسالة المستخدم.
+    const userMessageElement = addMessage(
+        userText || "ما محتوى هذه الصورة؟",
+        "user-message"
     );
 
-    chatBody.appendChild(incomingMessageDiv);
+    if (imageFile && userMessageElement) {
+        const image = document.createElement("img");
 
-    // Scroll chat to bottom
-    chatBody.scrollTo({
-      top: chatBody.scrollHeight,
-      behavior: "smooth",
+        image.src = URL.createObjectURL(imageFile);
+        image.alt = "الصورة المرسلة";
+        image.style.display = "block";
+        image.style.maxWidth = "220px";
+        image.style.maxHeight = "220px";
+        image.style.objectFit = "contain";
+        image.style.marginTop = "8px";
+        image.style.borderRadius = "10px";
+
+        const messageText = userMessageElement.querySelector(".message-text");
+
+        if (messageText) {
+            messageText.appendChild(image);
+        }
+    }
+
+    messageInput.value = "";
+    clearSelectedFile();
+
+    setLoading(true);
+
+    const loadingElement = addMessage("جاري التفكير...", "bot-message");
+
+    try {
+        const result = await getAIResponse(userText, imageFile);
+
+        if (loadingElement) {
+            loadingElement.remove();
+        }
+
+        // حفظ الرسائل في سجل المحادثة بعد نجاح الطلب.
+        chatHistory.push({
+            role: "user",
+            content: result.userContent
+        });
+
+        chatHistory.push({
+            role: "assistant",
+            content: result.answer
+        });
+
+        addMessage(result.answer, "bot-message");
+    } catch (error) {
+        if (loadingElement) {
+            loadingElement.remove();
+        }
+
+        console.error("BazaarLink API error:", error);
+
+        let message = "حدث خطأ أثناء الاتصال بالذكاء الاصطناعي.";
+
+        if (error.message) {
+            message += "\nالتفاصيل: " + error.message;
+        }
+
+        message +=
+            "\nتحقق من مفتاح API، واسم النموذج، والرصيد، وإعدادات حساب BazaarLink.";
+
+        showError(message);
+    } finally {
+        setLoading(false);
+
+        if (messageInput) {
+            messageInput.focus();
+        }
+    }
+}
+
+// ========================================
+// أحداث الإرسال
+// ========================================
+
+if (sendMessageButton) {
+    sendMessageButton.addEventListener("click", handleOutgoingMessage);
+}
+
+if (messageInput) {
+    messageInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            handleOutgoingMessage(event);
+        }
     });
+}
 
-    // Generate response
-    generateBotResponse(incomingMessageDiv);
+// ========================================
+// فتح وإغلاق الشات
+// ========================================
 
-  }, 600);
-};
+if (chatbotToggler) {
+    chatbotToggler.addEventListener("click", function () {
+        document.body.classList.toggle("show-chatbot");
+    });
+}
 
-// Adjust input field height dynamically
-messageInput.addEventListener("input", () => {
-  messageInput.style.height = `${initialInputHeight}px`;
+if (closeChatbotButton) {
+    closeChatbotButton.addEventListener("click", function () {
+        document.body.classList.remove("show-chatbot");
+    });
+}
 
-  messageInput.style.height =
-    `${messageInput.scrollHeight}px`;
+// ========================================
+// EmojiMart - إذا كانت المكتبة موجودة
+// ========================================
 
-  document.querySelector(".chat-form").style.borderRadius =
-    messageInput.scrollHeight > initialInputHeight
-      ? "15px"
-      : "32px";
-});
+const emojiButton = document.querySelector("#emoji-picker");
 
-// Handle Enter key press for sending messages
-messageInput.addEventListener("keydown", (e) => {
-  if (
-    e.key === "Enter" &&
-    !e.shiftKey &&
-    window.innerWidth > 768
-  ) {
-    e.preventDefault();
+if (emojiButton && typeof EmojiMart !== "undefined") {
+    emojiButton.addEventListener("click", async function () {
+        try {
+            const picker = new EmojiMart.Picker({
+                theme: "light",
+                onEmojiSelect: function (emoji) {
+                    if (!messageInput) return;
 
-    handleOutgoingMessage(e);
-  }
-});
+                    const start = messageInput.selectionStart;
+                    const end = messageInput.selectionEnd;
 
-// Handle file input change and preview the selected file
-fileInput.addEventListener("change", () => {
-  const file = fileInput.files[0];
+                    const before = messageInput.value.slice(0, start);
+                    const after = messageInput.value.slice(end);
 
-  if (!file) return;
+                    messageInput.value =
+                        before + emoji.native + after;
 
-  // Accept images only
-  if (!file.type.startsWith("image/")) {
-    alert("يرجى اختيار ملف صورة.");
+                    messageInput.focus();
 
-    fileInput.value = "";
+                    const cursorPosition =
+                        start + emoji.native.length;
 
-    return;
-  }
+                    messageInput.setSelectionRange(
+                        cursorPosition,
+                        cursorPosition
+                    );
+                }
+            });
 
-  const reader = new FileReader();
+            document.body.appendChild(picker);
 
-  reader.onload = (e) => {
-    const result = e.target.result;
+            // إزالة النافذة عند الضغط خارجها.
+            const closePicker = function (event) {
+                if (
+                    !picker.contains(event.target) &&
+                    event.target !== emojiButton
+                ) {
+                    picker.remove();
+                    document.removeEventListener("click", closePicker);
+                }
+            };
 
-    fileUploadWrapper.querySelector("img").src = result;
-
-    fileUploadWrapper.classList.add("file-uploaded");
-
-    const base64String = result.split(",")[1];
-
-    // Store image data
-    userData.file = {
-      data: base64String,
-      mime_type: file.type,
-    };
-  };
-
-  reader.onerror = () => {
-    alert("تعذر قراءة الملف. حاول اختيار صورة أخرى.");
-
-    fileInput.value = "";
-  };
-
-  reader.readAsDataURL(file);
-});
-
-// Cancel file upload
-fileCancelButton.addEventListener("click", () => {
-  userData.file = {
-    data: null,
-    mime_type: null,
-  };
-
-  fileInput.value = "";
-
-  fileUploadWrapper.classList.remove("file-uploaded");
-});
-
-// Initialize emoji picker and handle emoji selection
-const picker = new EmojiMart.Picker({
-  theme: "light",
-  skinTonePosition: "none",
-  previewPosition: "none",
+            setTimeout(() => {
+                document.addEventListener("click", closePicker);
+            }, 0);
+        } catch (error) {
+            console.error("Emoji picker error:", error);
+        }
+    });
+      }sition: "none",
 
   onEmojiSelect: (emoji) => {
     const {
